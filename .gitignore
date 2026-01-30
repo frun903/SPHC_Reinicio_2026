@@ -1,0 +1,21 @@
+# Build
+Debug/
+Release/
+
+# Eclipse / CubeIDE
+.settings/
+*.launch
+
+# Archivos generados
+*.o
+*.elf
+*.bin
+*.map
+
+# Temporales
+*.log
+*.tmp
+
+# Sistema
+.DS_Store
+Thumbs.db
