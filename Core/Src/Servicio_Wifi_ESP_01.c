@@ -64,6 +64,8 @@ void Wifi_ESP_Init(void)
     }
 
 
+
+
 void Wifi_ESP_UpRed(void){
 
 	  Mensaje_de_conectando();
@@ -328,26 +330,209 @@ void Get_primera_respuesta_Sensores(char *cadena_de_texto_de_Temperatura,char *c
 	    HAL_Delay(2000);  // Espera antes de la siguiente solicitud
 	}
 
-/*
-void new_respuesta(){
-	 sprintf(ATcommand,"AT+CIPSEND=%d,%d\r\n",channel,countB+countF+countT);
-		        memset(rxBuffer,0,sizeof(rxBuffer));
-		        HAL_UART_Transmit(&huart2,(uint8_t *)ATcommand,strlen(ATcommand),1000);
-		        HAL_UART_Receive (&huart2, rxBuffer, 512, 100);
-		        if(strstr((char *)rxBuffer,">"))
-		        {
-		          memset(rxBuffer,0,sizeof(rxBuffer));
-		            HAL_UART_Transmit(&huart2,(uint8_t *)ATcommandB,countB,1000);
-		            HAL_UART_Transmit(&huart2,(uint8_t *)ATcommandF,countF,1000);
-		            HAL_UART_Transmit(&huart2,(uint8_t *)ATcommandT,countT,1000);
-		           HAL_UART_Receive (&huart2, rxBuffer, 512, 100);
-		        }
-		        sprintf(ATcommand,"AT+CIPCLOSE=%d\r\n",channel);
-		        memset(rxBuffer,0,sizeof(rxBuffer));
-		        HAL_UART_Transmit(&huart2,(uint8_t *)ATcommand,strlen(ATcommand),1000);
-		        HAL_UART_Receive (&huart2, rxBuffer, 512, 100);
-		        channel=100;
-}*/
 
 
+//2026
+
+//Funcion para hacer comandos AT que solo esperan "OK" como respuesta
+static uint8_t ESP_SendAT_Wait(const char *cmd, uint32_t timeout_ms)
+{
+    memset(rxBuffer, 0, sizeof(rxBuffer));
+    HAL_UART_Transmit(&huart2, (uint8_t*)cmd, strlen(cmd), timeout_ms);
+    HAL_UART_Receive(&huart2, rxBuffer, sizeof(rxBuffer), timeout_ms);
+    return (strstr((char*)rxBuffer, "OK") != NULL);
+}
+
+static uint8_t ESP_RetryOK(const char *cmd, uint8_t retries, uint32_t timeout_ms, uint32_t delay_ms)
+{
+    for(uint8_t i=0; i<retries; i++){
+        if(ESP_SendAT_Wait(cmd, timeout_ms)) return 1;
+        HAL_Delay(delay_ms);
+    }
+    return 0;
+}
+
+
+static uint8_t ESP_SetWiFiMode(uint8_t mode) // 1=STA, 2=AP, 3=STA+AP
+{
+    snprintf(ATcommand, sizeof(ATcommand), "AT+CWMODE=%d\r\n", mode);
+    return ESP_RetryOK(ATcommand, 5, 5000, 500);
+}
+
+
+static void ESP_BasicReset(void)
+{
+    ESP_SendAT_Wait("AT\r\n", 5000);
+    HAL_Delay(200);
+
+    ESP_SendAT_Wait("AT+RST\r\n", 5000);
+    HAL_Delay(2000); // el reset necesita más tiempo
+}
+
+static uint8_t ESP_SetSoftAP(const char *ssid, const char *pass)
+{
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CWSAP=\"%s\",\"%s\",1,3,4,0\r\n", ssid, pass);
+    return ESP_RetryOK(ATcommand, 5, 5000, 500);
+}
+
+
+static uint8_t ESP_SetAP_IP(const char *ip)
+{
+    snprintf(ATcommand, sizeof(ATcommand), "AT+CIPAP=\"%s\"\r\n", ip);
+    return ESP_RetryOK(ATcommand, 5, 5000, 500);
+}
+
+static uint8_t ESP_EnableMux(uint8_t enable) // 0 o 1
+{
+    snprintf(ATcommand, sizeof(ATcommand), "AT+CIPMUX=%d\r\n", enable);
+    return ESP_RetryOK(ATcommand, 5, 5000, 200);
+}
+
+static uint8_t ESP_StartServer(uint16_t port)
+{
+    snprintf(ATcommand, sizeof(ATcommand), "AT+CIPSERVER=1,%d\r\n", port);
+    return ESP_RetryOK(ATcommand, 5, 5000, 200);
+}
+
+void Wifi_ESP_UpRed_SoftAP(void)
+{
+    Mensaje_de_conectando();
+
+    ESP_BasicReset();
+
+    if(!ESP_SetWiFiMode(2)) return; // AP
+    if(!ESP_SetSoftAP("Wifi de Puca", "12345678")) return;
+    if(!ESP_SetAP_IP("192.168.51.1")) return;
+    if(!ESP_EnableMux(1)) return;
+    if(!ESP_StartServer(80)) return;
+
+    Mensaje_de_Conexion_Exitosa();
+    HAL_Delay(5000);
+}
+
+
+static int ESP_ParseLinkID(const char *s)
+{
+    // Busca "+IPD,"
+    const char *p = strstr(s, "+IPD,");
+    if(!p) return -1;
+    p += 5; // salta "+IPD,"
+
+    // id termina en coma
+    int id = 0;
+    while(*p >= '0' && *p <= '9'){
+        id = id*10 + (*p - '0');
+        p++;
+    }
+    if(*p != ',') return -1;
+    return id;
+}
+
+
+static void ESP_HTTP_Send(int link_id, const char *body)
+{
+    char header[128];
+    int body_len = (int)strlen(body);
+
+    // Respuesta HTTP mínima (IMPORTANTE para browsers)
+    snprintf(header, sizeof(header),
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: text/html\r\n"
+             "Content-Length: %d\r\n"
+             "Connection: close\r\n"
+             "\r\n", body_len);
+
+    // 1) Pedir CIPSEND del total header+body
+    int total_len = (int)strlen(header) + body_len;
+    snprintf(ATcommand, sizeof(ATcommand), "AT+CIPSEND=%d,%d\r\n", link_id, total_len);
+
+    memset(rxBuffer,0,sizeof(rxBuffer));
+    HAL_UART_Transmit(&huart2, (uint8_t*)ATcommand, strlen(ATcommand), 5000);
+    HAL_UART_Receive(&huart2, rxBuffer, sizeof(rxBuffer), 5000);
+
+    // 2) esperar prompt ">"
+    if(strstr((char*)rxBuffer, ">")){
+        HAL_UART_Transmit(&huart2, (uint8_t*)header, strlen(header), 5000);
+        HAL_UART_Transmit(&huart2, (uint8_t*)body, body_len, 5000);
+    }
+
+    // 3) cerrar
+    snprintf(ATcommand, sizeof(ATcommand), "AT+CIPCLOSE=%d\r\n", link_id);
+    HAL_UART_Transmit(&huart2, (uint8_t*)ATcommand, strlen(ATcommand), 5000);
+}
+static const char *HTML_PORTAL =
+"<html><body>"
+"<h2>SPHC - Configurar WiFi</h2>"
+"<form action=\"/save\" method=\"get\">"
+"SSID:<br><input name=\"ssid\" maxlength=\"32\"><br>"
+"PASS:<br><input name=\"pass\" maxlength=\"64\" type=\"password\"><br><br>"
+"<input type=\"submit\" value=\"Guardar\">"
+"</form>"
+"</body></html>";
+
+static uint8_t ESP_ParseQueryParam(const char *req, const char *key, char *out, uint16_t out_len)
+{
+    // busca "key="
+    const char *p = strstr(req, key);
+    if(!p) return 0;
+    p += strlen(key);
+    if(*p != '=') return 0;
+    p++;
+
+    // copia hasta '&' o ' ' o fin
+    uint16_t i=0;
+    while(*p && *p!='&' && *p!=' ' && i < (out_len-1)){
+        out[i++] = *p++;
+    }
+    out[i]=0;
+    return (i>0);
+}
+
+uint8_t Wifi_ESP_PortalLoop_GetCredentials(char *out_ssid, uint16_t ssid_len,
+                                          char *out_pass, uint16_t pass_len)
+{
+    memset(rxBuffer, 0, sizeof(rxBuffer));
+    HAL_UART_Receive(&huart2, rxBuffer, sizeof(rxBuffer), 5000);
+
+    if(!strstr((char*)rxBuffer, "+IPD,")) return 0;
+
+    int link_id = ESP_ParseLinkID((char*)rxBuffer);
+    if(link_id < 0) return 0;
+
+    // Ruta pedida
+    if(strstr((char*)rxBuffer, "GET /save?")){
+        char ssid[33]={0};
+        char pass[65]={0};
+
+        uint8_t ok1 = ESP_ParseQueryParam((char*)rxBuffer, "ssid", ssid, sizeof(ssid));
+        uint8_t ok2 = ESP_ParseQueryParam((char*)rxBuffer, "pass", pass, sizeof(pass));
+
+        if(ok1 && ok2){
+            // Copia a salida
+            strncpy(out_ssid, ssid, ssid_len-1);
+            out_ssid[ssid_len-1]=0;
+
+            strncpy(out_pass, pass, pass_len-1);
+            out_pass[pass_len-1]=0;
+
+            ESP_HTTP_Send(link_id,
+                "<html><body><h3>Guardado OK</h3>"
+                "<p>Reiniciando / cambiando a modo Casa...</p></body></html>");
+
+            return 1; // credenciales listas
+        }else{
+            ESP_HTTP_Send(link_id,
+                "<html><body><h3>Error</h3><p>Faltan SSID o PASS</p></body></html>");
+            return 0;
+        }
+    }
+
+    // default: servir portal
+    if(strstr((char*)rxBuffer, "GET /")){
+        ESP_HTTP_Send(link_id, HTML_PORTAL);
+    }
+
+    return 0;
+}
 

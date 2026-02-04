@@ -26,6 +26,7 @@
 #include "Funciones_de_Apoyo_intermedio.h"
 #include "string.h"
 #include "stdio.h"
+#include "Servicio_Wifi_ESP_01.h"
 
 /* USER CODE END Includes */
 
@@ -46,7 +47,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
-
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
@@ -71,6 +71,10 @@ float temperatura_corporal_canido;
 float temp_izquierda;
 float temp_derecha;
 char temperatura_corporal_canido_texto[10];
+char g_ssid[33] = {0};   // SSID max 32 + '\0' vivendo en RAM
+char g_pass[65] = {0};   // PASS max 64 + '\0' Viviendo en RAM
+uint8_t cred_ok = 0;
+
 // char temperatura_corporal_canido_texto[10];
 
 
@@ -112,9 +116,27 @@ int main(void)
 
   Inicializo_Display();
   SaludoInicial();
+  Wifi_ESP_UpRed_SoftAP();
+
+
+  while(cred_ok == 0)
+  {
+      // opcional: mostrar algo en display
+	  Limpio_Display();
+	  Muestra_texto_Primer_Renglon("MODO - NEW WIFI");
+	  Muestra_texto_Segundo_renglon("Cargar WiFi en");
+	  Muestra_texto_Tercer_renglon("192.168.51.1");
+
+      cred_ok = Wifi_ESP_PortalLoop_GetCredentials(
+                    g_ssid, sizeof(g_ssid),
+                    g_pass, sizeof(g_pass));
+
+      // Pequeño delay para no saturar (opcional)
+      HAL_Delay(50);
+  }
 // LLamo a mi Funcion de obtener la temperatura promedio
 
-  temperatura_corporal_canido=Get_Temperatura_Sensor_Izquierdo();
+ // temperatura_corporal_canido=Get_Temperatura_Sensor_Izquierdo();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -122,17 +144,14 @@ int main(void)
   while (1)
   {
 
+	  Limpio_Display();
+	  Muestra_texto_Primer_Renglon(g_ssid);
+	  Muestra_texto_Segundo_renglon(g_pass);
 
-	  //temperatura_corporal_canido=Get_Temperatura_Sensor_Izquierdo();
-	  //floatToString(temperatura_corporal_canido, temperatura_corporal_canido_texto,2);
-	  //Muestra_de_Temperatura( temperatura_corporal_canido, 33, "Estado: Bien");
+	  HAL_Delay(200);
 
 
-	  Muestra_texto_Primer_Renglon("Hola Puca");
-	  Muestra_texto_Segundo_renglon("Te extranio");
-	  Muestra_texto_Tercer_renglon("By Fran");
 
-	  HAL_Delay(5000);
 
     /* USER CODE END WHILE */
 
@@ -287,6 +306,7 @@ static void MX_USART2_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 /* USER CODE BEGIN MX_GPIO_Init_1 */
 /* USER CODE END MX_GPIO_Init_1 */
 
@@ -294,6 +314,26 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1|GPIO_PIN_7, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_SET);
+
+  /*Configure GPIO pins : PA1 PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB0 PB1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
