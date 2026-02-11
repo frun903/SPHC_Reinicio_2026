@@ -6,6 +6,7 @@
  */
 #ifndef INC_SERVICIO_WIFI_ESP_01_H_
 #define INC_SERVICIO_WIFI_ESP_01_H_
+#include <stdint.h>
 
 extern int countB;
 extern int countN;
@@ -32,5 +33,15 @@ void Get_respuesta_Sensores_con_estado(char *cadena_de_texto_de_Temperatura,char
 
 void Wifi_ESP_UpRed_SoftAP(void);
 
+
+uint8_t Wifi_ESP_PortalLoop_GetCredentials(char *out_ssid, uint16_t ssid_len,
+                                           char *out_pass, uint16_t pass_len);
+
+void Wifi_ESP_UpRed_STA(void);
+
+// POST fijo por ahora:
+// name = "Ringo"
+// value = string (ej: "27.7")
+uint8_t ESP_HTTP_Post_Ringo(const char *host, uint16_t port, const char *value_str);
 
 #endif /* INC_SERVICIO_WIFI_ESP_01_H_ */

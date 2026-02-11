@@ -48,6 +48,14 @@ extern UART_HandleTypeDef huart2;
 
     char ATcommandT[16] = "</body></html>";
 
+
+    // Estas variables viven en main.c (globales)
+    extern char g_ssid[33];
+    extern char g_pass[65];
+
+
+
+
     // Variables para almacenar las longitudes
     int countB;
     int countN;
@@ -397,7 +405,7 @@ static uint8_t ESP_StartServer(uint16_t port)
 
 void Wifi_ESP_UpRed_SoftAP(void)
 {
-    Mensaje_de_conectando();
+   // Mensaje_de_conectando();
 
     ESP_BasicReset();
 
@@ -407,7 +415,7 @@ void Wifi_ESP_UpRed_SoftAP(void)
     if(!ESP_EnableMux(1)) return;
     if(!ESP_StartServer(80)) return;
 
-    Mensaje_de_Conexion_Exitosa();
+  //  Mensaje_de_Conexion_Exitosa();
     HAL_Delay(5000);
 }
 
@@ -535,4 +543,244 @@ uint8_t Wifi_ESP_PortalLoop_GetCredentials(char *out_ssid, uint16_t ssid_len,
 
     return 0;
 }
+
+
+
+
+// Conexion de Modo en casa
+
+static uint16_t ESP_ReadSome(uint8_t *buf, uint16_t maxlen, uint32_t total_timeout_ms)
+{
+    uint32_t t0 = HAL_GetTick();
+    uint16_t n = 0;
+    uint8_t ch;
+
+    while ((HAL_GetTick() - t0) < total_timeout_ms && n < (maxlen - 1))
+    {
+        if (HAL_UART_Receive(&huart2, &ch, 1, 20) == HAL_OK)
+        {
+            buf[n++] = ch;
+            t0 = HAL_GetTick(); // extiende mientras sigan entrando bytes
+        }
+    }
+    buf[n] = 0;
+    return n;
+}
+
+static uint8_t ESP_SendAT_WaitStr(const char *cmd, const char *expect, uint32_t timeout_ms)
+{
+    memset(rxBuffer, 0, sizeof(rxBuffer));
+    HAL_UART_Transmit(&huart2, (uint8_t*)cmd, strlen(cmd), 1000);
+    ESP_ReadSome(rxBuffer, sizeof(rxBuffer), timeout_ms);
+    return (strstr((char*)rxBuffer, expect) != NULL);
+}
+
+
+static uint8_t ESP_JoinAP(const char *ssid, const char *pass)
+{
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CWJAP=\"%s\",\"%s\"\r\n", ssid, pass);
+
+    for (int i = 0; i < 3; i++)
+    {
+        if (ESP_SendAT_WaitStr(ATcommand, "OK", 20000)) return 1; // puede tardar
+        HAL_Delay(1500);
+    }
+    return 0;
+}
+
+static uint8_t ESP_TCP_Get(const char *host, uint16_t port, const char *path)
+{
+    // 1) abrir TCP
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CIPSTART=\"TCP\",\"%s\",%u\r\n", host, (unsigned)port);
+
+    if (!ESP_SendAT_WaitStr(ATcommand, "OK", 8000) &&
+        !ESP_SendAT_WaitStr(ATcommand, "CONNECT", 8000))
+    {
+        return 0;
+    }
+
+    // 2) armar GET
+    char req[256];
+    snprintf(req, sizeof(req),
+             "GET %s HTTP/1.1\r\n"
+             "Host: %s:%u\r\n"
+             "Connection: close\r\n"
+             "\r\n",
+             path, host, (unsigned)port);
+
+    // 3) CIPSEND
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CIPSEND=%u\r\n", (unsigned)strlen(req));
+
+    if (!ESP_SendAT_WaitStr(ATcommand, ">", 3000)) return 0;
+
+    // 4) enviar request
+    HAL_UART_Transmit(&huart2, (uint8_t*)req, strlen(req), 2000);
+
+    // 5) leer respuesta “por ventana” hasta que cierre o timeout
+    uint32_t t0 = HAL_GetTick();
+    uint8_t got_ipd = 0;
+    uint8_t got_200 = 0;
+
+    memset(rxBuffer, 0, sizeof(rxBuffer));
+
+    while ((HAL_GetTick() - t0) < 6000)   // 6s ventana
+    {
+        // acumulá lo que llegue
+        ESP_ReadSome(rxBuffer, sizeof(rxBuffer), 200);
+
+        if (strstr((char*)rxBuffer, "+IPD")) got_ipd = 1;
+        if (strstr((char*)rxBuffer, "HTTP/1.1 200")) got_200 = 1;
+        if (strstr((char*)rxBuffer, "CLOSED")) break;
+
+        // si ya vimos datos y 200, podés cortar antes
+        if (got_ipd && got_200) break;
+    }
+
+    // NO cierres de inmediato: dejá que "Connection: close" haga lo suyo
+    // (si querés, podés intentar CIPCLOSE al final, pero no es necesario)
+    // ESP_SendAT_WaitStr("AT+CIPCLOSE\r\n", "OK", 2000);
+
+    // Criterio robusto:
+    // - si vimos 200 => OK
+    // - si no vimos 200 pero sí vimos +IPD => el server respondió (OK para health)
+    if (got_200) return 1;
+    if (got_ipd) return 1;
+
+    return 0;
+}
+
+void Wifi_ESP_UpRed_STA(void)
+{
+    Mensaje_de_conectando();
+
+    Limpio_Display();
+    Muestra_texto_Primer_Renglon("MODO CASA (STA)");
+    Muestra_texto_Segundo_renglon("Init ESP...");
+
+    // AT + Reset
+    ESP_SendAT_WaitStr("AT\r\n", "OK", 1000);
+    ESP_SendAT_WaitStr("AT+RST\r\n", "OK", 2000);
+    HAL_Delay(3000);
+
+    // STA mode
+    if (!ESP_SendAT_WaitStr("AT+CWMODE=1\r\n", "OK", 2000))
+    {
+        Limpio_Display();
+        Muestra_texto_Primer_Renglon("STA FAIL");
+        return;
+    }
+
+    // Conectar con credenciales ya guardadas en g_ssid/g_pass
+    Limpio_Display();
+    Muestra_texto_Primer_Renglon("Conectando...");
+    Muestra_texto_Segundo_renglon(g_ssid);
+
+    if (!ESP_JoinAP(g_ssid, g_pass))
+    {
+        Limpio_Display();
+        Muestra_texto_Primer_Renglon("CWJAP FAIL");
+        Muestra_texto_Segundo_renglon("SSID/PASS?");
+        return;
+    }
+
+    // Modo single-conn (simple)
+    if (!ESP_SendAT_WaitStr("AT+CIPMUX=0\r\n", "OK", 2000))
+    {
+        Limpio_Display();
+        Muestra_texto_Primer_Renglon("MUX0 FAIL");
+        return;
+    }
+
+    // (Opcional) IP
+    ESP_SendAT_WaitStr("AT+CIFSR\r\n", "OK", 2000);
+
+    // Probar server local: GET /health
+    Limpio_Display();
+    Muestra_texto_Primer_Renglon("WiFi OK");
+    Muestra_texto_Segundo_renglon("Probe /health");
+
+    if (ESP_TCP_Get("192.168.100.29", 8000, "/health"))
+    {
+        Limpio_Display();
+        Muestra_texto_Primer_Renglon("SERVER OK");
+        Muestra_texto_Segundo_renglon("192.168.100.29");
+    }
+    else
+    {
+        Limpio_Display();
+        Muestra_texto_Primer_Renglon("SERVER FAIL");
+        Muestra_texto_Segundo_renglon("Check LAN");
+    }
+}
+
+
+
+//POST
+uint8_t ESP_HTTP_Post_Ringo(const char *host, uint16_t port, const char *value_str)
+{
+    // 1) Abrir TCP
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CIPSTART=\"TCP\",\"%s\",%u\r\n", host, (unsigned)port);
+
+    if (!ESP_SendAT_WaitStr(ATcommand, "OK", 8000) &&
+        !ESP_SendAT_WaitStr(ATcommand, "CONNECT", 8000))
+    {
+        return 0;
+    }
+
+    // 2) JSON body
+    char body[128];
+    snprintf(body, sizeof(body),
+             "{\"name\":\"Ringo\",\"value\":\"%s\"}", value_str);
+
+    // 3) HTTP POST
+    char req[384];
+    int body_len = strlen(body);
+
+    snprintf(req, sizeof(req),
+             "POST /items HTTP/1.1\r\n"
+             "Host: %s:%u\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %d\r\n"
+             "Connection: close\r\n"
+             "\r\n"
+             "%s",
+             host, (unsigned)port, body_len, body);
+
+    // 4) CIPSEND
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CIPSEND=%u\r\n", (unsigned)strlen(req));
+
+    if (!ESP_SendAT_WaitStr(ATcommand, ">", 3000))
+        return 0;
+
+    // 5) Enviar POST
+    HAL_UART_Transmit(&huart2, (uint8_t*)req, strlen(req), 4000);
+
+    // 6) Leer respuesta
+    uint32_t t0 = HAL_GetTick();
+    uint8_t got_201 = 0;
+
+    memset(rxBuffer, 0, sizeof(rxBuffer));
+
+    while ((HAL_GetTick() - t0) < 6000)
+    {
+        ESP_ReadSome(rxBuffer, sizeof(rxBuffer), 200);
+
+        if (strstr((char*)rxBuffer, "201"))
+        {
+            got_201 = 1;
+            break;
+        }
+
+        if (strstr((char*)rxBuffer, "CLOSED"))
+            break;
+    }
+
+    return got_201;
+}
+
 

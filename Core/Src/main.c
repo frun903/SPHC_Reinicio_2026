@@ -24,9 +24,11 @@
 #include "Servicio_Temperatura_Corporea.h"
 #include "Servicio_Display.h"
 #include "Funciones_de_Apoyo_intermedio.h"
+#include "servicio_ledRGB.h"
 #include "string.h"
 #include "stdio.h"
 #include "Servicio_Wifi_ESP_01.h"
+//#include "esp_01_sleep.h" Inavilitado
 
 /* USER CODE END Includes */
 
@@ -47,10 +49,22 @@
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
+
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+
+//Aqui van las interrupciones.
+volatile uint8_t btn14_event = 0;
+volatile uint8_t btn15_event = 0;
+
+static uint32_t last14_ms = 0;
+static uint32_t last15_ms = 0;
+static const uint32_t DEBOUNCE_MS = 30;
+
+
+
 
 /* USER CODE END PV */
 
@@ -75,6 +89,15 @@ char g_ssid[33] = {0};   // SSID max 32 + '\0' vivendo en RAM
 char g_pass[65] = {0};   // PASS max 64 + '\0' Viviendo en RAM
 uint8_t cred_ok = 0;
 
+
+typedef enum {
+  Q0_BLANCO = 0,
+  Q1_AZUL,
+  Q2_ROJO,
+  Q3_VERDE
+} estado_t;
+
+estado_t estado = Q0_BLANCO;
 // char temperatura_corporal_canido_texto[10];
 
 
@@ -114,13 +137,20 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  LED_RGB_Init();  //dejo led apagado
   Inicializo_Display();
   SaludoInicial();
-  Wifi_ESP_UpRed_SoftAP();
+
+// Prendo el GPIOB12 y espero 7mseg
+  LED_RGB_SetColor(LED_RGB_WHITE);
+  Wifi_ESP_UpRed_SoftAP(); //Configuro la
 
 
+//Levanto la clave de WIFI
   while(cred_ok == 0)
   {
+	  //LED indica modo
+	  LED_RGB_SetColor(LED_RGB_MAGENTA);
       // opcional: mostrar algo en display
 	  Limpio_Display();
 	  Muestra_texto_Primer_Renglon("MODO - NEW WIFI");
@@ -132,9 +162,17 @@ int main(void)
                     g_pass, sizeof(g_pass));
 
       // Pequeño delay para no saturar (opcional)
+      estado = Q1_AZUL;
       HAL_Delay(50);
   }
 // LLamo a mi Funcion de obtener la temperatura promedio
+  	  Limpio_Display();
+  	  Muestra_texto_Primer_Renglon(g_ssid);
+  	  Muestra_texto_Segundo_renglon(g_pass);
+  	  HAL_Delay(2000);
+  	  LED_RGB_SetColor(LED_RGB_WHITE);
+  	  HAL_Delay(2000);
+  	  Wifi_ESP_UpRed_STA();
 
  // temperatura_corporal_canido=Get_Temperatura_Sensor_Izquierdo();
   /* USER CODE END 2 */
@@ -143,13 +181,68 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
 	  Limpio_Display();
-	  Muestra_texto_Primer_Renglon(g_ssid);
-	  Muestra_texto_Segundo_renglon(g_pass);
+	  Muestra_texto_Primer_Renglon("Modo");
+	  HAL_Delay(2000);
+	  // Entradas A y B (eventos latcheados por EXTI)
+	  uint8_t A = (btn14_event != 0);
+	  uint8_t B = (btn15_event != 0);
 
-	  HAL_Delay(200);
+	  // Consumimos eventos (así A/B valen 1 solo una vez)
+	  btn14_event = 0;
+	  btn15_event = 0;
 
+	  // A=0 y B=0 -> no pasó nada
+	  if (!A && !B) {
+	    HAL_Delay(20);   // tu "representación" de A=0,B=0
+	  }
+
+	  switch (estado)
+	  {
+	    case Q0_BLANCO:
+	      LED_RGB_SetColor(LED_RGB_WHITE);
+
+	      if (A) estado = Q1_AZUL;     // A=1 -> Q1
+	      else if (B) estado = Q2_ROJO; // B=1 -> Q2
+	      break;
+
+	    case Q1_AZUL:
+	    	Limpio_Display();
+	        Muestra_texto_Primer_Renglon("Modo Casa");
+	        HAL_Delay(2000);
+	      LED_RGB_SetColor(LED_RGB_BLUE);
+	      if (ESP_HTTP_Post_Ringo("192.168.100.29", 8000, "27.7"))
+	      {
+	          Limpio_Display();
+	          Muestra_texto_Primer_Renglon("POST OK");
+	          Muestra_texto_Segundo_renglon("Ringo 27.7");
+	          HAL_Delay(2000);
+	      }
+	      else
+	      {
+	          Limpio_Display();
+	          Muestra_texto_Primer_Renglon("POST FAIL");
+	      }
+
+	      if (B) estado = Q2_ROJO;     // B=1 -> Q2
+	      else if (A) estado = Q3_VERDE; // A=1 -> Q3 (según tu esquema)
+	      break;
+
+	    case Q2_ROJO:
+	      LED_RGB_SetColor(LED_RGB_RED);
+
+	      if (A) estado = Q1_AZUL;     // A=1 -> Q1
+	      break;
+
+	    case Q3_VERDE:
+	      LED_RGB_SetColor(LED_RGB_GREEN);
+	      HAL_Delay(2000);
+	      // A=0 y B=0 -> vuelve a Q1 (según tu flecha "A=0 B=0")
+	      if (!A && !B) estado = Q1_AZUL;
+	      break;
+	  }
+
+	  //ESP01_PowerOn();
 
 
 
@@ -316,31 +409,57 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1|GPIO_PIN_7, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_12, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : PA1 PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_7;
+  /*Configure GPIO pin : PA7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB0 PB1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+  /*Configure GPIO pins : PB0 PB1 PB12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB14 PB15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_14|GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  uint32_t now = HAL_GetTick();
 
+  if (GPIO_Pin == GPIO_PIN_14) {
+    if ((now - last14_ms) > DEBOUNCE_MS) {
+      btn14_event = 1;
+      last14_ms = now;
+    }
+  }
+  else if (GPIO_Pin == GPIO_PIN_15) {
+    if ((now - last15_ms) > DEBOUNCE_MS) {
+      btn15_event = 1;
+      last15_ms = now;
+    }
+  }
+}
 /* USER CODE END 4 */
 
 /**
