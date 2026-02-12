@@ -405,7 +405,7 @@ static uint8_t ESP_StartServer(uint16_t port)
 
 void Wifi_ESP_UpRed_SoftAP(void)
 {
-   // Mensaje_de_conectando();
+    Mensaje_de_conectando();
 
     ESP_BasicReset();
 
@@ -415,8 +415,8 @@ void Wifi_ESP_UpRed_SoftAP(void)
     if(!ESP_EnableMux(1)) return;
     if(!ESP_StartServer(80)) return;
 
-  //  Mensaje_de_Conexion_Exitosa();
-    HAL_Delay(5000);
+   Mensaje_de_Conexion_Exitosa();
+    HAL_Delay(2000);
 }
 
 
@@ -526,7 +526,7 @@ uint8_t Wifi_ESP_PortalLoop_GetCredentials(char *out_ssid, uint16_t ssid_len,
 
             ESP_HTTP_Send(link_id,
                 "<html><body><h3>Guardado OK</h3>"
-                "<p>Reiniciando / cambiando a modo Casa...</p></body></html>");
+                "<p>Reiniciando / Cambiando a Menu Modo...</p></body></html>");
 
             return 1; // credenciales listas
         }else{
@@ -666,7 +666,7 @@ void Wifi_ESP_UpRed_STA(void)
     HAL_Delay(3000);
 
     // STA mode
-    if (!ESP_SendAT_WaitStr("AT+CWMODE=1\r\n", "OK", 2000))
+    if (!ESP_SetWiFiMode(1))
     {
         Limpio_Display();
         Muestra_texto_Primer_Renglon("STA FAIL");

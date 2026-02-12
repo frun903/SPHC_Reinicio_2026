@@ -21,13 +21,14 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "string.h"
+#include "stdio.h"
 #include "Servicio_Temperatura_Corporea.h"
 #include "Servicio_Display.h"
 #include "Funciones_de_Apoyo_intermedio.h"
 #include "servicio_ledRGB.h"
-#include "string.h"
-#include "stdio.h"
 #include "Servicio_Wifi_ESP_01.h"
+#include "Servicio_NVM.h"
 //#include "esp_01_sleep.h" Inavilitado
 
 /* USER CODE END Includes */
@@ -85,8 +86,9 @@ float temperatura_corporal_canido;
 float temp_izquierda;
 float temp_derecha;
 char temperatura_corporal_canido_texto[10];
-char g_ssid[33] = {0};   // SSID max 32 + '\0' vivendo en RAM
-char g_pass[65] = {0};   // PASS max 64 + '\0' Viviendo en RAM
+char g_ssid[NVM_SSID_MAX+1] = {0};
+char g_pass[NVM_PASS_MAX+1] = {0};
+char g_name[NVM_NAME_MAX+1] = {0};
 uint8_t cred_ok = 0;
 
 
@@ -137,17 +139,50 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  NVM_Creds_t cfg; //Guardado en Flash
+  //NVM_EraseAll();
+
   LED_RGB_Init();  //dejo led apagado
+  //LED_RGB_SetColor(LED_RGB_WHITE);
+
   Inicializo_Display();
   SaludoInicial();
+  HAL_Delay(2000);
 
-// Prendo el GPIOB12 y espero 7mseg
-  LED_RGB_SetColor(LED_RGB_WHITE);
-  Wifi_ESP_UpRed_SoftAP(); //Configuro la
+  //Consultar si teiene credenciales Guardas
+  if (NVM_LoadCreds(&cfg)) {
+      // Confirmación en display
+	  strncpy(g_ssid, cfg.ssid, sizeof(g_ssid)-1); g_ssid[sizeof(g_ssid)-1] = '\0';
+	  strncpy(g_pass, cfg.pass, sizeof(g_pass)-1); g_pass[sizeof(g_pass)-1] = '\0';
+	  strncpy(g_name, cfg.name, sizeof(g_name)-1); g_name[sizeof(g_name)-1] = '\0';
+
+	  Limpio_Display();
+      Muestra_texto_Primer_Renglon("Credenciales OK");
+      Muestra_texto_Segundo_renglon(cfg.ssid);
+      Muestra_texto_Tercer_renglon(cfg.pass);
+      HAL_Delay(1800);
+
+      // Copiar cfg a tu módulo WiFi si corresponde
+      // WIFI_SetCreds(cfg.ssid, cfg.pass);
+
+      estado = Q1_AZUL;
+
+  } else {
+      Limpio_Display();
+      Muestra_texto_Primer_Renglon("SIN WIFI");
+      Muestra_texto_Segundo_renglon("Configurado");
+      HAL_Delay(1800);
+
+      // No hace falta reset acá
+      estado = Q3_VERDE;
+  }
+
+
+//  Wifi_ESP_UpRed_SoftAP(); //Configuro la
 
 
 //Levanto la clave de WIFI
-  while(cred_ok == 0)
+ /* while(cred_ok == 0)
   {
 	  //LED indica modo
 	  LED_RGB_SetColor(LED_RGB_MAGENTA);
@@ -164,15 +199,16 @@ int main(void)
       // Pequeño delay para no saturar (opcional)
       estado = Q1_AZUL;
       HAL_Delay(50);
-  }
+  }*/
 // LLamo a mi Funcion de obtener la temperatura promedio
-  	  Limpio_Display();
+  	  /*Limpio_Display();
   	  Muestra_texto_Primer_Renglon(g_ssid);
   	  Muestra_texto_Segundo_renglon(g_pass);
   	  HAL_Delay(2000);
   	  LED_RGB_SetColor(LED_RGB_WHITE);
   	  HAL_Delay(2000);
-  	  Wifi_ESP_UpRed_STA();
+  	  Wifi_ESP_UpRed_STA();*/
+
 
  // temperatura_corporal_canido=Get_Temperatura_Sensor_Izquierdo();
   /* USER CODE END 2 */
@@ -207,8 +243,10 @@ int main(void)
 	      break;
 
 	    case Q1_AZUL:
+
 	    	Limpio_Display();
 	        Muestra_texto_Primer_Renglon("Modo Casa");
+	        Wifi_ESP_UpRed_STA();
 	        HAL_Delay(2000);
 	      LED_RGB_SetColor(LED_RGB_BLUE);
 	      if (ESP_HTTP_Post_Ringo("192.168.100.29", 8000, "27.7"))
@@ -222,10 +260,11 @@ int main(void)
 	      {
 	          Limpio_Display();
 	          Muestra_texto_Primer_Renglon("POST FAIL");
+	          HAL_Delay(2000);
 	      }
-
-	      if (B) estado = Q2_ROJO;     // B=1 -> Q2
-	      else if (A) estado = Q3_VERDE; // A=1 -> Q3 (según tu esquema)
+	      estado = Q1_AZUL;     // A
+	     // if (B) estado = Q2_ROJO;     // B=1 -> Q2
+	      //else if (A) estado = Q3_VERDE; // A=1 -> Q3 (según tu esquema)
 	      break;
 
 	    case Q2_ROJO:
@@ -235,15 +274,72 @@ int main(void)
 	      break;
 
 	    case Q3_VERDE:
-	      LED_RGB_SetColor(LED_RGB_GREEN);
-	      HAL_Delay(2000);
-	      // A=0 y B=0 -> vuelve a Q1 (según tu flecha "A=0 B=0")
-	      if (!A && !B) estado = Q1_AZUL;
-	      break;
-	  }
+	     // LED_RGB_SetColor(LED_RGB_GREEN);
+	    	 Limpio_Display();
+	    	    Muestra_texto_Primer_Renglon("Por favor espere...");
+	    	    Muestra_texto_Segundo_renglon(".../...");
+	    	    HAL_Delay(1000);
 
-	  //ESP01_PowerOn();
+	    	    cred_ok = 0;
 
+	    	    Wifi_ESP_UpRed_SoftAP();
+
+	    	    while (cred_ok == 0)
+	    	    {
+	    	        LED_RGB_SetColor(LED_RGB_MAGENTA);
+
+	    	        Limpio_Display();
+	    	        Muestra_texto_Primer_Renglon("MODO - NEW WIFI");
+	    	        Muestra_texto_Segundo_renglon("Cargar WiFi en");
+	    	        Muestra_texto_Tercer_renglon("192.168.51.1");
+
+	    	        cred_ok = Wifi_ESP_PortalLoop_GetCredentials(
+	    	                      g_ssid, sizeof(g_ssid),
+	    	                      g_pass, sizeof(g_pass));
+
+	    	        HAL_Delay(50);
+	    	    }
+
+	    	    // Nombre fijo por ahora
+	    	    strncpy(g_name, "Puh-ra", sizeof(g_name)-1);
+	    	    g_name[sizeof(g_name)-1] = '\0';
+
+	    	    NVM_Creds_t cfg_new;
+	    	    memset(&cfg_new, 0, sizeof(cfg_new));
+
+	    	    strncpy(cfg_new.ssid, g_ssid, NVM_SSID_MAX-1);
+	    	    strncpy(cfg_new.pass, g_pass, NVM_PASS_MAX-1);
+	    	    strncpy(cfg_new.name, g_name, NVM_NAME_MAX-1);
+
+	    	    if (cfg_new.ssid[0] == '\0') {
+	    	        Limpio_Display();
+	    	        Muestra_texto_Primer_Renglon("SSID vacio");
+	    	        HAL_Delay(1200);
+	    	    } else {
+	    	        Limpio_Display();
+	    	        Muestra_texto_Primer_Renglon("Guardando FLASH...");
+	    	        if (NVM_SaveCreds(&cfg_new)) {
+	    	            Limpio_Display();
+	    	            Muestra_texto_Primer_Renglon("FLASH OK");
+	    	            Muestra_texto_Segundo_renglon(cfg_new.ssid);
+	    	            Muestra_texto_Tercer_renglon(cfg_new.ssid);
+	    	            HAL_Delay(1200);
+
+	    	            // ya quedan en RAM también
+	    	            strncpy(g_ssid, cfg_new.ssid, sizeof(g_ssid)-1); g_ssid[sizeof(g_ssid)-1] = '\0';
+	    	            strncpy(g_pass, cfg_new.pass, sizeof(g_pass)-1); g_pass[sizeof(g_pass)-1] = '\0';
+	    	            strncpy(g_name, cfg_new.name, sizeof(g_name)-1); g_name[sizeof(g_name)-1] = '\0';
+
+	    	            estado = Q1_AZUL;   // salir del modo config
+	    	        } else {
+	    	            Limpio_Display();
+	    	            Muestra_texto_Primer_Renglon("ERROR FLASH");
+	    	            HAL_Delay(1500);
+	    	        }
+	    	    }
+
+	    	    break;
+	    	}
 
 
     /* USER CODE END WHILE */
