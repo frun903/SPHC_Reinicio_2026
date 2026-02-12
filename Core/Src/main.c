@@ -75,6 +75,12 @@ static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
+
+uint8_t Hay_Evento_Botones(void)
+{
+    return (btn14_event || btn15_event);
+}
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -82,25 +88,35 @@ static void MX_USART2_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 //Variables
+
+//DS18B20 obtencion de temperatura
 float temperatura_corporal_canido;
-float temp_izquierda;
-float temp_derecha;
 char temperatura_corporal_canido_texto[10];
+
+//NVM Kectura de memoria FLASH
 char g_ssid[NVM_SSID_MAX+1] = {0};
 char g_pass[NVM_PASS_MAX+1] = {0};
 char g_name[NVM_NAME_MAX+1] = {0};
+
+// FLAG= Bandera de Credenciales si/no
 uint8_t cred_ok = 0;
 
 
+// EStados
+uint8_t estado_prev = 0;
+
+
+// Estados de la FSM
 typedef enum {
-  Q0_BLANCO = 0,
-  Q1_AZUL,
-  Q2_ROJO,
-  Q3_VERDE
+  Q0_MENU = 0,
+  Q1_MODO_PASEO,
+  Q2_MODO_CASA,
+  Q3_MODO_NEW_WIFI,
+  Q4_MODO_CONFIG
 } estado_t;
 
-estado_t estado = Q0_BLANCO;
-// char temperatura_corporal_canido_texto[10];
+estado_t estado = Q0_MENU;
+
 
 
 /* USER CODE END 0 */
@@ -140,15 +156,16 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   NVM_Creds_t cfg; //Guardado en Flash
-  //NVM_EraseAll();
+  //NVM_EraseAll(); //Esta funcion se uso en estados de prueba para resetear la FLASH
 
-  LED_RGB_Init();  //dejo led apagado
-  //LED_RGB_SetColor(LED_RGB_WHITE);
+  LED_RGB_Init();  //dejo led apagado hasta modo paseo
+
 
   Inicializo_Display();
   SaludoInicial();
   HAL_Delay(2000);
 
+  //INIT
   //Consultar si teiene credenciales Guardas
   if (NVM_LoadCreds(&cfg)) {
       // Confirmación en display
@@ -162,93 +179,154 @@ int main(void)
       Muestra_texto_Tercer_renglon(cfg.pass);
       HAL_Delay(1800);
 
-      // Copiar cfg a tu módulo WiFi si corresponde
-      // WIFI_SetCreds(cfg.ssid, cfg.pass);
 
-      estado = Q1_AZUL;
+      estado = Q0_MENU;
 
   } else {
       Limpio_Display();
-      Muestra_texto_Primer_Renglon("SIN WIFI");
-      Muestra_texto_Segundo_renglon("Configurado");
+      Muestra_texto_Primer_Renglon("Sin Credenciales");
+      Muestra_texto_Segundo_renglon("Ir a config WiFi");
       HAL_Delay(1800);
 
-      // No hace falta reset acá
-      estado = Q3_VERDE;
+      // Defino el estado para ir a configuracion del WIFI
+      estado = Q3_MODO_NEW_WIFI;
   }
 
-
-//  Wifi_ESP_UpRed_SoftAP(); //Configuro la
-
-
-//Levanto la clave de WIFI
- /* while(cred_ok == 0)
-  {
-	  //LED indica modo
-	  LED_RGB_SetColor(LED_RGB_MAGENTA);
-      // opcional: mostrar algo en display
-	  Limpio_Display();
-	  Muestra_texto_Primer_Renglon("MODO - NEW WIFI");
-	  Muestra_texto_Segundo_renglon("Cargar WiFi en");
-	  Muestra_texto_Tercer_renglon("192.168.51.1");
-
-      cred_ok = Wifi_ESP_PortalLoop_GetCredentials(
-                    g_ssid, sizeof(g_ssid),
-                    g_pass, sizeof(g_pass));
-
-      // Pequeño delay para no saturar (opcional)
-      estado = Q1_AZUL;
-      HAL_Delay(50);
-  }*/
-// LLamo a mi Funcion de obtener la temperatura promedio
-  	  /*Limpio_Display();
-  	  Muestra_texto_Primer_Renglon(g_ssid);
-  	  Muestra_texto_Segundo_renglon(g_pass);
-  	  HAL_Delay(2000);
-  	  LED_RGB_SetColor(LED_RGB_WHITE);
-  	  HAL_Delay(2000);
-  	  Wifi_ESP_UpRed_STA();*/
-
-
- // temperatura_corporal_canido=Get_Temperatura_Sensor_Izquierdo();
+  Limpio_Display();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  Limpio_Display();
-	  Muestra_texto_Primer_Renglon("Modo");
-	  HAL_Delay(2000);
 	  // Entradas A y B (eventos latcheados por EXTI)
-	  uint8_t A = (btn14_event != 0);
-	  uint8_t B = (btn15_event != 0);
-
+	  uint8_t A_prev  = (btn14_event != 0);
+	  uint8_t B_prev  = (btn15_event != 0);
 	  // Consumimos eventos (así A/B valen 1 solo una vez)
 	  btn14_event = 0;
 	  btn15_event = 0;
 
-	  // A=0 y B=0 -> no pasó nada
-	  if (!A && !B) {
-	    HAL_Delay(20);   // tu "representación" de A=0,B=0
-	  }
-
 	  switch (estado)
 	  {
-	    case Q0_BLANCO:
-	      LED_RGB_SetColor(LED_RGB_WHITE);
+	  //MENU
+	  case Q0_MENU:
 
-	      if (A) estado = Q1_AZUL;     // A=1 -> Q1
-	      else if (B) estado = Q2_ROJO; // B=1 -> Q2
+	      Limpio_Display();
+	      Muestra_texto_Primer_Renglon("MENU");
+	      Muestra_texto_Segundo_renglon("A=Paseo  B=Casa");
+
+	      //  Si ya hubo click previo, NO espero y me voy al evento
+	      if (!A_prev && !B_prev)
+	      {
+	        uint16_t i;
+	        for (i = 0; i < 700; i++) {      // 5s (100*50ms)
+	          if (btn14_event || btn15_event) break;
+	          HAL_Delay(50);
+	        }
+	      }
+
+	      // Capturo clicks DURANTE la espera
+	      uint8_t A_wait = (btn14_event != 0);
+	      uint8_t B_wait = (btn15_event != 0);
+
+	      // Consumo lo ocurrido durante la espera
+	      btn14_event = 0;
+	      btn15_event = 0;
+
+	      // evdento total = evento previo OR evento drante espera
+	      uint8_t A = (A_prev || A_wait);
+	      uint8_t B = (B_prev || B_wait);
+
+	      if (B)      estado = Q2_MODO_CASA;
+	      else if (A) estado = Q1_MODO_PASEO;
+	      else        estado = Q1_MODO_PASEO;  // timeout
+
 	      break;
 
-	    case Q1_AZUL:
+	    //MODO PASEO
+	    case Q1_MODO_PASEO:
+
+	    	    if(estado_prev!=2){
+	    	    	Limpio_Display();
+	    	    	Muestra_texto_Primer_Renglon("Modo Paseo");
+	    	    	Limpio_Display();
+	    	    	Wait_New();
+	    	    }
+
+	    	    estado_prev=2;
+
+	    	    // Si había evento previo, saltar
+	    	    if (A_prev) {
+	    	        estado = Q2_MODO_CASA;   // tu regla actual
+	    	        break;                  // mejor que continue dentro del switch
+	    	    }
+
+	    	    // Medición
+	    	    temperatura_corporal_canido = Get_Temperatura_Promedio_Canido();
+	    	    floatToString(temperatura_corporal_canido, temperatura_corporal_canido_texto, 3);
+
+	    	    // ESTABLE
+	    	    if (temperatura_corporal_canido <= 32.0f)
+	    	    {
+	    	        Muestra_texto_Primer_Renglon("ESTABLE");
+	    	        Muestra_texto_Segundo_renglon("Temperatura:");
+	    	        Muestra_texto_Tercer_renglon(temperatura_corporal_canido_texto);
+
+	    	        // Limpio eventos antes de esperar
+	    	        btn14_event = 0;
+	    	        btn15_event = 0;
+
+	    	        // Espera 7s pero con salida si hay evento
+	    	        Espera_Con_Salida(7000, Hay_Evento_Botones);
+
+	    	        // Si querés: si se presionó algo, decidir transición acá (opcional)
+	    	         uint8_t A = (btn14_event != 0);
+	    	       //  uint8_t B = (btn15_event != 0);
+	    	         btn14_event = 0; btn15_event = 0;
+	    	          if (A) { estado = Q2_MODO_CASA; break; }
+	    	        // if (B) { estado = Q2_MODO_CASA; break; }
+
+	    	        continue;
+	    	    }
+	    	    // ALERTA
+	    	    else if (temperatura_corporal_canido > 32.0f && temperatura_corporal_canido < 36.0f)
+	    	    {
+	    	        Muestra_texto_Primer_Renglon("ALERTA!");
+	    	        Muestra_texto_Segundo_renglon("Temperatura:");
+	    	        Muestra_texto_Tercer_renglon(temperatura_corporal_canido_texto);
+
+	    	        btn14_event = 0;
+	    	        btn15_event = 0;
+
+	    	        Espera_Con_Salida(3000, Hay_Evento_Botones);
+	    	         uint8_t A = (btn14_event != 0);
+	    	        // uint8_t B = (btn15_event != 0);
+	    	         btn14_event = 0; btn15_event = 0;
+	    	          if (A) { estado = Q2_MODO_CASA; break; }
+
+	    	        continue;
+	    	    }
+	    	    // PELIGRO
+	    	    else // temperatura_corporal_canido >= 36.0f
+	    	    {
+	    	        Muestra_texto_Primer_Renglon("PELIGRO");
+	    	        Muestra_texto_Segundo_renglon("Temperatura: ALTA");
+	    	        Muestra_texto_Tercer_renglon(temperatura_corporal_canido_texto);
+
+	    	        continue;
+	    	    }
+
+	    	 break;
+
+
+
+
+	    case Q2_MODO_CASA:
 
 	    	Limpio_Display();
 	        Muestra_texto_Primer_Renglon("Modo Casa");
 	        Wifi_ESP_UpRed_STA();
 	        HAL_Delay(2000);
-	      LED_RGB_SetColor(LED_RGB_BLUE);
 	      if (ESP_HTTP_Post_Ringo("192.168.100.29", 8000, "27.7"))
 	      {
 	          Limpio_Display();
@@ -262,18 +340,13 @@ int main(void)
 	          Muestra_texto_Primer_Renglon("POST FAIL");
 	          HAL_Delay(2000);
 	      }
-	      estado = Q1_AZUL;     // A
+
 	     // if (B) estado = Q2_ROJO;     // B=1 -> Q2
 	      //else if (A) estado = Q3_VERDE; // A=1 -> Q3 (según tu esquema)
 	      break;
 
-	    case Q2_ROJO:
-	      LED_RGB_SetColor(LED_RGB_RED);
 
-	      if (A) estado = Q1_AZUL;     // A=1 -> Q1
-	      break;
-
-	    case Q3_VERDE:
+	    case Q3_MODO_NEW_WIFI:
 	     // LED_RGB_SetColor(LED_RGB_GREEN);
 	    	 Limpio_Display();
 	    	    Muestra_texto_Primer_Renglon("Por favor espere...");
@@ -330,7 +403,7 @@ int main(void)
 	    	            strncpy(g_pass, cfg_new.pass, sizeof(g_pass)-1); g_pass[sizeof(g_pass)-1] = '\0';
 	    	            strncpy(g_name, cfg_new.name, sizeof(g_name)-1); g_name[sizeof(g_name)-1] = '\0';
 
-	    	            estado = Q1_AZUL;   // salir del modo config
+	    	            estado = Q0_MENU;   // salir del modo
 	    	        } else {
 	    	            Limpio_Display();
 	    	            Muestra_texto_Primer_Renglon("ERROR FLASH");

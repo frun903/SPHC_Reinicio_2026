@@ -5,6 +5,11 @@
  *      Author: Fran
  */
 
+#include "stdint.h"
+
+uint8_t Espera_Con_Salida(uint32_t total_ms, uint8_t (*check_event)(void));
+
+
 void floatToString(float number, char *buffer, int decimalPlaces);
 
 void Wait_New();

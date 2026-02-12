@@ -53,8 +53,24 @@ void floatToString(float number, char *buffer, int decimalPlaces) {
 }
 
 void Wait_New(){
-	HAL_Delay(60000);
+	HAL_Delay(5000);
 }
+
+
+
+uint8_t Espera_Con_Salida(uint32_t total_ms, uint8_t (*check_event)(void))
+{
+    uint32_t pasos = total_ms / 50;
+    if (pasos == 0) pasos = 1;
+
+    for (uint32_t i = 0; i < pasos; i++) {
+        if (check_event()) return 1;
+        HAL_Delay(50);
+    }
+
+    return check_event();
+}
+
 
 
 

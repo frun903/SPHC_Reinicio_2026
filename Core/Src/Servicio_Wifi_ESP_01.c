@@ -657,7 +657,7 @@ void Wifi_ESP_UpRed_STA(void)
     Mensaje_de_conectando();
 
     Limpio_Display();
-    Muestra_texto_Primer_Renglon("MODO CASA (STA)");
+    Muestra_texto_Primer_Renglon("MODO CASA ");
     Muestra_texto_Segundo_renglon("Init ESP...");
 
     // AT + Reset
