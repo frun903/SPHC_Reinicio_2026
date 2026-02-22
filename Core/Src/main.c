@@ -323,56 +323,91 @@ int main(void)
 
 	    case Q2_MODO_CASA:
 
-	    	 // Mensaje solo al entrar (evita parpadeo)
+	    	 static uint8_t wifi_sta_ready = 0;
+	    	    static uint8_t wifi_need_connect = 1;
+	    	    static uint32_t t_last_retry = 0;
+	    	    static uint8_t post_fail_count = 0;
+
+	    	    // Mensaje solo al entrar
 	    	    if (estado_prev != 2) {
 	    	        Limpio_Display();
 	    	        Muestra_texto_Primer_Renglon("Modo Casa");
-	    	        Limpio_Display();
 
+	    	        // Al entrar a CASA, pedimos conexión (por si venís de CONFIG o reset)
+	    	        wifi_need_connect = 1;
+	    	        wifi_sta_ready = 0;
+	    	        post_fail_count = 0;
+
+	    	        Wait_New(); // ojo: si esto bloquea mucho, movelo abajo con salida
 	    	    }
+
 	    	    estado_prev = 2;
+
+	    	    // 1) Siempre medimos (prioridad sistema)
 	    	    temperatura_corporal_canido = Get_Temperatura_Promedio_Canido();
 	    	    floatToString(temperatura_corporal_canido, temperatura_corporal_canido_texto, 3);
-    	        // Levantar red STA SOLO UNA VEZ al entrar
-    	        Wifi_ESP_UpRed_STA();
-    	        Wait_New();
 
-
-	    	    // --- En este punto, el usuario puede querer salir YA ---
-	    	    // Capturo evento previo (del inicio del while)
+	    	    // Salida rápida
 	    	    if (A_prev) { estado = Q1_MODO_PASEO; break; }
 	    	    if (B_prev) { estado = Q4_MODO_CONFIG; break; }
 
-	    	    // --- POST ---
-	    	    // (si tu post tarda, esto ya es el "bloqueo" inevitable, pero evitamos delays extra)
+	    	    // 2) Conectar WiFi SOLO si hace falta, y no todo el tiempo
+	    	    if (!wifi_sta_ready) {
+	    	        // retry cada 10s (ajustá)
+	    	        if (wifi_need_connect || (HAL_GetTick() - t_last_retry) > 10000) {
+	    	            t_last_retry = HAL_GetTick();
+
+	    	            Limpio_Display();
+	    	            Muestra_texto_Primer_Renglon("WiFi: conectando");
+	    	            Muestra_texto_Segundo_renglon("Espere...");
+
+	    	            wifi_sta_ready = Wifi_ESP_UpRed_STA();  // <-- ahora retorna 0/1
+	    	            wifi_need_connect = 0;
+
+	    	            // Salida rápida post intento
+	    	            if (A_prev) { estado = Q1_MODO_PASEO; break; }
+	    	            if (B_prev) { estado = Q4_MODO_CONFIG; break; }
+	    	        }
+
+	    	        // Si no hay WiFi, NO intento POST
+	    	        Limpio_Display();
+	    	        Muestra_texto_Primer_Renglon("Sin WiFi");
+	    	        Muestra_texto_Segundo_renglon("Reintento auto");
+	    	        Espera_Con_Salida(800, Hay_Evento_Botones);
+	    	        break;
+	    	    }
+
+	    	    // 3) POST (solo si wifi_sta_ready == 1)
 	    	    Limpio_Display();
 	    	    Muestra_texto_Primer_Renglon("Enviando POST...");
-	    	    Muestra_texto_Segundo_renglon("Servidor 192.168...");
+	    	    Muestra_texto_Segundo_renglon("192.168.100.29");
 
-	    	    if (ESP_HTTP_Post_Item("192.168.100.29",8000, g_name,temperatura_corporal_canido_texto))
-	    	    {
+	    	    if (ESP_HTTP_Post_Item("192.168.100.29", 8000, g_name, temperatura_corporal_canido_texto)) {
 	    	        Limpio_Display();
 	    	        Muestra_texto_Primer_Renglon("POST OK");
-	    	        Muestra_texto_Segundo_renglon("Ringo 27.7");
-	    	    }
-	    	    else
-	    	    {
+	    	        Muestra_texto_Segundo_renglon(temperatura_corporal_canido_texto); // <-- corregido
+	    	        post_fail_count = 0;
+	    	    } else {
 	    	        Limpio_Display();
 	    	        Muestra_texto_Primer_Renglon("POST FAIL");
 	    	        Muestra_texto_Segundo_renglon("Reintento...");
+	    	        post_fail_count++;
+
+	    	        // si falla 3 veces, forzá reconexión (recuperación simple)
+	    	        if (post_fail_count >= 3) {
+	    	            wifi_sta_ready = 0;
+	    	            wifi_need_connect = 1;
+	    	            post_fail_count = 0;
+	    	        }
 	    	    }
 
-	    	    // --- Espera corta con salida (anti-bloqueo y anti-rebote) ---
-	    	    // Durante esta ventana, el sistema "escucha" botones
-	    	    btn14_event = 0;
-	    	    btn15_event = 0;
+	    	    // 4) Ventana de salida
+	    	    btn14_event = 0; btn15_event = 0;
+	    	    Espera_Con_Salida(1200, Hay_Evento_Botones);
 
-	    	    Espera_Con_Salida(1200, Hay_Evento_Botones);  // 1.2s mostrás resultado sin congelarte “ciego”
-
-	    	     A = (btn14_event != 0);
-	    	     B = (btn15_event != 0);
-	    	    btn14_event = 0;
-	    	    btn15_event = 0;
+	    	    A = (btn14_event != 0);
+	    	    B = (btn15_event != 0);
+	    	    btn14_event = 0; btn15_event = 0;
 
 	    	    if (A) { estado = Q1_MODO_PASEO; break; }
 	    	    if (B) { estado = Q4_MODO_CONFIG; break; }

@@ -37,7 +37,7 @@ void Wifi_ESP_UpRed_SoftAP(void);
 uint8_t Wifi_ESP_PortalLoop_GetCredentials(char *out_ssid, uint16_t ssid_len,
                                            char *out_pass, uint16_t pass_len);
 
-void Wifi_ESP_UpRed_STA(void);
+uint8_t Wifi_ESP_UpRed_STA(void);
 
 // POST fijo por ahora:
 // name = "Ringo"

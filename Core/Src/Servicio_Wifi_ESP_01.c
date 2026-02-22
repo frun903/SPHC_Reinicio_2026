@@ -652,13 +652,13 @@ static uint8_t ESP_TCP_Get(const char *host, uint16_t port, const char *path)
     return 0;
 }
 
-void Wifi_ESP_UpRed_STA(void)
+uint8_t Wifi_ESP_UpRed_STA(void)
 {
     Mensaje_de_conectando();
 
     Limpio_Display();
-    Muestra_texto_Primer_Renglon("MODO CASA ");
-    Muestra_texto_Segundo_renglon("Init ESP...");
+    Muestra_texto_Primer_Renglon("Configurando");
+    Muestra_texto_Segundo_renglon("Espere...");
 
     // AT + Reset
     ESP_SendAT_WaitStr("AT\r\n", "OK", 1000);
@@ -675,7 +675,7 @@ void Wifi_ESP_UpRed_STA(void)
 
     // Conectar con credenciales ya guardadas en g_ssid/g_pass
     Limpio_Display();
-    Muestra_texto_Primer_Renglon("Conectando...");
+    Muestra_texto_Primer_Renglon("Conectando a...");
     Muestra_texto_Segundo_renglon(g_ssid);
 
     if (!ESP_JoinAP(g_ssid, g_pass))
@@ -700,7 +700,7 @@ void Wifi_ESP_UpRed_STA(void)
     // Probar server local: GET /health
     Limpio_Display();
     Muestra_texto_Primer_Renglon("WiFi OK");
-    Muestra_texto_Segundo_renglon("Probe /health");
+    Muestra_texto_Segundo_renglon("Prob SERV");
 
     if (ESP_TCP_Get("192.168.100.29", 8000, "/health"))
     {
