@@ -44,4 +44,8 @@ void Wifi_ESP_UpRed_STA(void);
 // value = string (ej: "27.7")
 uint8_t ESP_HTTP_Post_Ringo(const char *host, uint16_t port, const char *value_str);
 
+uint8_t ESP_HTTP_Post_Item(const char *host, uint16_t port,
+                           const char *name,
+                           const char *value_str);
+
 #endif /* INC_SERVICIO_WIFI_ESP_01_H_ */

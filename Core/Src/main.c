@@ -191,7 +191,7 @@ int main(void)
       // Defino el estado para ir a configuracion del WIFI
       estado = Q3_MODO_NEW_WIFI;
   }
-
+  strncpy(g_name, "Puca", sizeof(g_name)-1);
   Limpio_Display();
   /* USER CODE END 2 */
 
@@ -214,12 +214,12 @@ int main(void)
 	      Limpio_Display();
 	      Muestra_texto_Primer_Renglon("MENU");
 	      Muestra_texto_Segundo_renglon("A=Paseo  B=Casa");
-
+	      estado_prev=0;
 	      //  Si ya hubo click previo, NO espero y me voy al evento
 	      if (!A_prev && !B_prev)
 	      {
 	        uint16_t i;
-	        for (i = 0; i < 700; i++) {      // 5s (100*50ms)
+	        for (i = 0; i < 100; i++) {      // dejar en 700
 	          if (btn14_event || btn15_event) break;
 	          HAL_Delay(50);
 	        }
@@ -237,23 +237,23 @@ int main(void)
 	      uint8_t A = (A_prev || A_wait);
 	      uint8_t B = (B_prev || B_wait);
 
-	      if (B)      estado = Q2_MODO_CASA;
-	      else if (A) estado = Q1_MODO_PASEO;
-	      else        estado = Q1_MODO_PASEO;  // timeout
+	      if (B)      { estado_prev = 0; estado = Q2_MODO_CASA; }
+	      else if (A) { estado_prev = 0; estado = Q1_MODO_PASEO; }
+	      else        { estado_prev = 0; estado = Q2_MODO_CASA; }  // timeout
 
 	      break;
 
 	    //MODO PASEO
 	    case Q1_MODO_PASEO:
 
-	    	    if(estado_prev!=2){
+	    	    if(estado_prev!=1){
 	    	    	Limpio_Display();
 	    	    	Muestra_texto_Primer_Renglon("Modo Paseo");
 	    	    	Limpio_Display();
 	    	    	Wait_New();
 	    	    }
 
-	    	    estado_prev=2;
+	    	    estado_prev=1;
 
 	    	    // Si había evento previo, saltar
 	    	    if (A_prev) {
@@ -323,32 +323,75 @@ int main(void)
 
 	    case Q2_MODO_CASA:
 
-	    	Limpio_Display();
-	        Muestra_texto_Primer_Renglon("Modo Casa");
-	        Wifi_ESP_UpRed_STA();
-	        HAL_Delay(2000);
-	      if (ESP_HTTP_Post_Ringo("192.168.100.29", 8000, "27.7"))
-	      {
-	          Limpio_Display();
-	          Muestra_texto_Primer_Renglon("POST OK");
-	          Muestra_texto_Segundo_renglon("Ringo 27.7");
-	          HAL_Delay(2000);
-	      }
-	      else
-	      {
-	          Limpio_Display();
-	          Muestra_texto_Primer_Renglon("POST FAIL");
-	          HAL_Delay(2000);
-	      }
+	    	 // Mensaje solo al entrar (evita parpadeo)
+	    	    if (estado_prev != 2) {
+	    	        Limpio_Display();
+	    	        Muestra_texto_Primer_Renglon("Modo Casa");
+	    	        Limpio_Display();
 
-	     // if (B) estado = Q2_ROJO;     // B=1 -> Q2
-	      //else if (A) estado = Q3_VERDE; // A=1 -> Q3 (según tu esquema)
-	      break;
+	    	    }
+	    	    estado_prev = 2;
+	    	    temperatura_corporal_canido = Get_Temperatura_Promedio_Canido();
+	    	    floatToString(temperatura_corporal_canido, temperatura_corporal_canido_texto, 3);
+    	        // Levantar red STA SOLO UNA VEZ al entrar
+    	        Wifi_ESP_UpRed_STA();
+    	        Wait_New();
+
+
+	    	    // --- En este punto, el usuario puede querer salir YA ---
+	    	    // Capturo evento previo (del inicio del while)
+	    	    if (A_prev) { estado = Q1_MODO_PASEO; break; }
+	    	    if (B_prev) { estado = Q4_MODO_CONFIG; break; }
+
+	    	    // --- POST ---
+	    	    // (si tu post tarda, esto ya es el "bloqueo" inevitable, pero evitamos delays extra)
+	    	    Limpio_Display();
+	    	    Muestra_texto_Primer_Renglon("Enviando POST...");
+	    	    Muestra_texto_Segundo_renglon("Servidor 192.168...");
+
+	    	    if (ESP_HTTP_Post_Item("192.168.100.29",8000, g_name,temperatura_corporal_canido_texto))
+	    	    {
+	    	        Limpio_Display();
+	    	        Muestra_texto_Primer_Renglon("POST OK");
+	    	        Muestra_texto_Segundo_renglon("Ringo 27.7");
+	    	    }
+	    	    else
+	    	    {
+	    	        Limpio_Display();
+	    	        Muestra_texto_Primer_Renglon("POST FAIL");
+	    	        Muestra_texto_Segundo_renglon("Reintento...");
+	    	    }
+
+	    	    // --- Espera corta con salida (anti-bloqueo y anti-rebote) ---
+	    	    // Durante esta ventana, el sistema "escucha" botones
+	    	    btn14_event = 0;
+	    	    btn15_event = 0;
+
+	    	    Espera_Con_Salida(1200, Hay_Evento_Botones);  // 1.2s mostrás resultado sin congelarte “ciego”
+
+	    	     A = (btn14_event != 0);
+	    	     B = (btn15_event != 0);
+	    	    btn14_event = 0;
+	    	    btn15_event = 0;
+
+	    	    if (A) { estado = Q1_MODO_PASEO; break; }
+	    	    if (B) { estado = Q4_MODO_CONFIG; break; }
+
+	    	    // Si no hubo botones, seguís en CASA (próximo ciclo repetirá POST según tu diseño)
+	    	    break;
 
 
 	    case Q3_MODO_NEW_WIFI:
 	     // LED_RGB_SetColor(LED_RGB_GREEN);
-	    	 Limpio_Display();
+	        if(estado_prev!=3){
+	    	    	    	Limpio_Display();
+	    	    	    	Muestra_texto_Primer_Renglon("Modo Conf Red");
+	    	    	    	Limpio_Display();
+	    	    	    	Wait_New();
+	    	    	    }
+	        estado_prev=3;
+
+	    	Limpio_Display();
 	    	    Muestra_texto_Primer_Renglon("Por favor espere...");
 	    	    Muestra_texto_Segundo_renglon(".../...");
 	    	    HAL_Delay(1000);
@@ -412,6 +455,53 @@ int main(void)
 	    	    }
 
 	    	    break;
+
+	    case Q4_MODO_CONFIG:
+
+	   	      Limpio_Display();
+	   	      Muestra_texto_Primer_Renglon("MENU RED");
+	   	      Muestra_texto_Segundo_renglon("A=Config  B=Volver");
+
+	   	      //  Si ya hubo click previo, NO espero y me voy al evento
+	   	      if (!A_prev && !B_prev)
+	   	      {
+	   	        uint16_t i;
+	   	        for (i = 0; i < 700; i++) {      // 5s (100*50ms)
+	   	          if (btn14_event || btn15_event) break;
+	   	          HAL_Delay(50);
+	   	        }
+	   	      }
+
+	   	      // Capturo clicks DURANTE la espera
+	   	      A_wait = (btn14_event != 0);
+	   	      B_wait = (btn15_event != 0);
+
+	   	      // Consumo lo ocurrido durante la espera
+	   	      btn14_event = 0;
+	   	      btn15_event = 0;
+
+	   	      // evdento total = evento previo OR evento drante espera
+	   	       A = (A_prev || A_wait);
+	   	       B = (B_prev || B_wait);
+
+	   	    if (B) {
+	   	           // volver al estado previo real
+	   	           if (estado_prev == 1) estado = Q1_MODO_PASEO;
+	   	           else if (estado_prev == 2) estado = Q2_MODO_CASA;
+	   	           else estado = Q0_MENU;
+	   	       }
+	   	       else if (A) {
+	   	           estado = Q3_MODO_NEW_WIFI;
+	   	       }
+	   	       else {
+	   	           // timeout vuelve
+	   	           if (estado_prev == 1) estado = Q1_MODO_PASEO;
+	   	           else if (estado_prev == 2) estado = Q2_MODO_CASA;
+	   	           else estado = Q0_MENU;
+	   	       }
+
+	   	      break;
+
 	    	}
 
 

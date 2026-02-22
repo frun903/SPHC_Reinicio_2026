@@ -783,4 +783,70 @@ uint8_t ESP_HTTP_Post_Ringo(const char *host, uint16_t port, const char *value_s
     return got_201;
 }
 
+uint8_t ESP_HTTP_Post_Item(const char *host, uint16_t port,
+                           const char *name,
+                           const char *value_str)
+{
+    // 1) Abrir TCP
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CIPSTART=\"TCP\",\"%s\",%u\r\n", host, (unsigned)port);
+
+    if (!ESP_SendAT_WaitStr(ATcommand, "OK", 8000) &&
+        !ESP_SendAT_WaitStr(ATcommand, "CONNECT", 8000))
+    {
+        return 0;
+    }
+
+    // 2) JSON body
+    char body[192];  // amplié un poco el buffer por seguridad
+    snprintf(body, sizeof(body),
+             "{\"name\":\"%s\",\"value\":\"%s\"}", name, value_str);
+
+    // 3) HTTP POST
+    char req[480];   // también ampliado
+    int body_len = strlen(body);
+
+    snprintf(req, sizeof(req),
+             "POST /items HTTP/1.1\r\n"
+             "Host: %s:%u\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %d\r\n"
+             "Connection: close\r\n"
+             "\r\n"
+             "%s",
+             host, (unsigned)port, body_len, body);
+
+    // 4) CIPSEND
+    snprintf(ATcommand, sizeof(ATcommand),
+             "AT+CIPSEND=%u\r\n", (unsigned)strlen(req));
+
+    if (!ESP_SendAT_WaitStr(ATcommand, ">", 3000))
+        return 0;
+
+    // 5) Enviar POST
+    HAL_UART_Transmit(&huart2, (uint8_t*)req, strlen(req), 4000);
+
+    // 6) Leer respuesta
+    uint32_t t0 = HAL_GetTick();
+    uint8_t got_201 = 0;
+
+    memset(rxBuffer, 0, sizeof(rxBuffer));
+
+    while ((HAL_GetTick() - t0) < 6000)
+    {
+        ESP_ReadSome(rxBuffer, sizeof(rxBuffer), 200);
+
+        if (strstr((char*)rxBuffer, "201"))
+        {
+            got_201 = 1;
+            break;
+        }
+
+        if (strstr((char*)rxBuffer, "CLOSED"))
+            break;
+    }
+
+    return got_201;
+}
+
 
