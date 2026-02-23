@@ -239,7 +239,7 @@ int main(void)
 
 	      if (B)      { estado_prev = 0; estado = Q2_MODO_CASA; }
 	      else if (A) { estado_prev = 0; estado = Q1_MODO_PASEO; }
-	      else        { estado_prev = 0; estado = Q2_MODO_CASA; }  // timeout
+	      else        { estado_prev = 0; estado = Q1_MODO_PASEO; }  // timeout
 
 	      break;
 
@@ -249,8 +249,8 @@ int main(void)
 	    	    if(estado_prev!=1){
 	    	    	Limpio_Display();
 	    	    	Muestra_texto_Primer_Renglon("Modo Paseo");
-	    	    	Limpio_Display();
 	    	    	Wait_New();
+	    	    	Limpio_Display();
 	    	    }
 
 	    	    estado_prev=1;
@@ -265,56 +265,31 @@ int main(void)
 	    	    temperatura_corporal_canido = Get_Temperatura_Promedio_Canido();
 	    	    floatToString(temperatura_corporal_canido, temperatura_corporal_canido_texto, 3);
 
-	    	    // ESTABLE
-	    	    if (temperatura_corporal_canido <= 32.0f)
-	    	    {
-	    	        Muestra_texto_Primer_Renglon("ESTABLE");
-	    	        Muestra_texto_Segundo_renglon("Temperatura:");
-	    	        Muestra_texto_Tercer_renglon(temperatura_corporal_canido_texto);
+	    	    uint32_t wait_ms = SPHC_PeriodoMs_SegunTemp(temperatura_corporal_canido);
 
-	    	        // Limpio eventos antes de esperar
-	    	        btn14_event = 0;
-	    	        btn15_event = 0;
-
-	    	        // Espera 7s pero con salida si hay evento
-	    	        Espera_Con_Salida(7000, Hay_Evento_Botones);
-
-	    	        // Si querés: si se presionó algo, decidir transición acá (opcional)
-	    	         uint8_t A = (btn14_event != 0);
-	    	       //  uint8_t B = (btn15_event != 0);
-	    	         btn14_event = 0; btn15_event = 0;
-	    	          if (A) { estado = Q2_MODO_CASA; break; }
-	    	        // if (B) { estado = Q2_MODO_CASA; break; }
-
-	    	        continue;
+	    	    // Mostrás textos (si querés) según rango
+	    	    if (temperatura_corporal_canido <= 32.0f) {
+	    	      Muestra_texto_Primer_Renglon("ESTABLE");
+	    	    } else if (temperatura_corporal_canido < 36.0f) {
+	    	      Muestra_texto_Primer_Renglon("ALERTA!");
+	    	    } else {
+	    	      Muestra_texto_Primer_Renglon("PELIGRO");
 	    	    }
-	    	    // ALERTA
-	    	    else if (temperatura_corporal_canido > 32.0f && temperatura_corporal_canido < 36.0f)
-	    	    {
-	    	        Muestra_texto_Primer_Renglon("ALERTA!");
-	    	        Muestra_texto_Segundo_renglon("Temperatura:");
-	    	        Muestra_texto_Tercer_renglon(temperatura_corporal_canido_texto);
 
-	    	        btn14_event = 0;
-	    	        btn15_event = 0;
+	    	    Muestra_texto_Segundo_renglon("Temperatura:");
+	    	    Muestra_texto_Tercer_renglon(temperatura_corporal_canido_texto);
 
-	    	        Espera_Con_Salida(3000, Hay_Evento_Botones);
-	    	         uint8_t A = (btn14_event != 0);
-	    	        // uint8_t B = (btn15_event != 0);
-	    	         btn14_event = 0; btn15_event = 0;
-	    	          if (A) { estado = Q2_MODO_CASA; break; }
+	    	    btn14_event = 0; btn15_event = 0;
+	    	    Espera_Con_Salida(wait_ms, Hay_Evento_Botones);
 
-	    	        continue;
-	    	    }
-	    	    // PELIGRO
-	    	    else // temperatura_corporal_canido >= 36.0f
-	    	    {
-	    	        Muestra_texto_Primer_Renglon("PELIGRO");
-	    	        Muestra_texto_Segundo_renglon("Temperatura: ALTA");
-	    	        Muestra_texto_Tercer_renglon(temperatura_corporal_canido_texto);
+	    	    A = (btn14_event != 0);
+	    	    B = (btn15_event != 0);
+	    	    btn14_event = 0; btn15_event = 0;
 
-	    	        continue;
-	    	    }
+	    	    if (A) { estado = Q2_MODO_CASA; break; }
+	    	    if (B) { estado = Q4_MODO_CONFIG; break; }
+
+	    	    // y seguís en paseo
 
 	    	 break;
 
